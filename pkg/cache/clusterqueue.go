@@ -53,6 +53,7 @@ var (
 // holds admitted workloads.
 type clusterQueue struct {
 	Name              string
+	Annotations       map[string]string
 	ResourceGroups    []ResourceGroup
 	Workloads         map[string]*workload.Info
 	WorkloadsNotReady sets.Set[string]
@@ -149,6 +150,8 @@ func (c *clusterQueue) updateClusterQueue(cycleChecker hierarchy.CycleChecker, i
 			updateClusterQueueResourceNode(c)
 		}
 	}
+
+	c.Annotations = in.Annotations
 
 	nsSelector, err := metav1.LabelSelectorAsSelector(in.Spec.NamespaceSelector)
 	if err != nil {

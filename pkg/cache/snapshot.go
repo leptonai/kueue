@@ -138,6 +138,7 @@ func (c *Cache) Snapshot(ctx context.Context) (*Snapshot, error) {
 func snapshotClusterQueue(c *clusterQueue) *ClusterQueueSnapshot {
 	cc := &ClusterQueueSnapshot{
 		Name:                          c.Name,
+		Annotations:                   c.Annotations,
 		ResourceGroups:                make([]ResourceGroup, len(c.ResourceGroups)),
 		FlavorFungibility:             c.FlavorFungibility,
 		FairWeight:                    c.FairWeight,
