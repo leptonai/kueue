@@ -38,6 +38,7 @@ import (
 	config "sigs.k8s.io/kueue/apis/config/v1beta1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/pkg/cache"
+	leptonapis "sigs.k8s.io/kueue/pkg/lepton/apis"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/scheduler/flavorassigner"
@@ -116,7 +117,21 @@ type Target struct {
 func (p *Preemptor) GetTargets(log logr.Logger, wl workload.Info, assignment flavorassigner.Assignment, snapshot *cache.Snapshot) []*Target {
 	frsNeedPreemption := flavorResourcesNeedPreemption(assignment)
 	requests := assignment.TotalRequestsFor(&wl)
+	if leptonapis.CanPreempt(wl.Obj) {
+		return p.getTargetsByLepton(log, wl, requests, frsNeedPreemption, snapshot)
+	}
 	return p.getTargets(log, wl, requests, frsNeedPreemption, snapshot)
+}
+
+func (p *Preemptor) getTargetsByLepton(log logr.Logger, wl workload.Info, requests resources.FlavorResourceQuantities,
+	frsNeedPreemption sets.Set[resources.FlavorResource], snapshot *cache.Snapshot) []*Target {
+	cq := snapshot.ClusterQueues[wl.ClusterQueue]
+	candidates := p.findCandidatesByLepton(wl.Obj, cq, frsNeedPreemption)
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, candidatesOrdering(candidates, cq.Name, p.clock.Now()))
+	return minimalPreemptions(log, requests, cq, snapshot, frsNeedPreemption, candidates, true, nil)
 }
 
 func (p *Preemptor) getTargets(log logr.Logger, wl workload.Info, requests resources.FlavorResourceQuantities,
@@ -481,6 +496,45 @@ func flavorResourcesNeedPreemption(assignment flavorassigner.Assignment) sets.Se
 		}
 	}
 	return resPerFlavor
+}
+
+func (p *Preemptor) findCandidatesByLepton(wl *kueue.Workload, cq *cache.ClusterQueueSnapshot, frsNeedPreemption sets.Set[resources.FlavorResource]) []*workload.Info {
+	var candidates []*workload.Info
+	wlPriority := priority.Priority(wl)
+
+	for _, candidateWl := range cq.Workloads {
+		if canBeCandidateByLepton(wlPriority, candidateWl, frsNeedPreemption) {
+			candidates = append(candidates, candidateWl)
+		}
+	}
+
+	if cq.HasParent() {
+		for _, cohortCQ := range cq.Parent().Root().SubtreeClusterQueues() {
+			if cq == cohortCQ {
+				// Can't reclaim quota from itself or ClusterQueues that are not borrowing.
+				continue
+			}
+			for _, candidateWl := range cohortCQ.Workloads {
+				if canBeCandidateByLepton(wlPriority, candidateWl, frsNeedPreemption) {
+					candidates = append(candidates, candidateWl)
+				}
+			}
+		}
+	}
+	return candidates
+}
+
+func canBeCandidateByLepton(selfPriority int32, candidateWl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
+	if !leptonapis.CanBePreempted(candidateWl.Obj) {
+		return false
+	}
+	if priority.Priority(candidateWl.Obj) >= selfPriority {
+		return false
+	}
+	if !workloadUsesResources(candidateWl, frsNeedPreemption) {
+		return false
+	}
+	return true
 }
 
 // findCandidates obtains candidates for preemption within the ClusterQueue and
