@@ -1,0 +1,15 @@
+name: lepton-release
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build-image:
+    uses: ./.github/workflows/lepton-build-image.yaml
+    secrets: inherit
+    with:
+      repo: lepton-kueue
+      tag: ${GITHUB_REF##*/}
+      commit: ${GITHUB_REF##*/}

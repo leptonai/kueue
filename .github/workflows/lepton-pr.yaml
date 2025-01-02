@@ -1,0 +1,12 @@
+name: lepton-pr
+
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build-image:
+    uses: ./.github/workflows/lepton-build-image.yaml
+    secrets: inherit
+    with:
+      repo: lepton-kueue
