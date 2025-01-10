@@ -84,21 +84,24 @@ type hierarchicalResourceNode interface {
 // This function may return a negative number in the case of
 // overadmission - e.g. capacity was removed or the node moved to
 // another Cohort.
-func available(node hierarchicalResourceNode, fr resources.FlavorResource) int64 {
+func available(node hierarchicalResourceNode, fr resources.FlavorResource) (_ int64, _isRoot bool) {
 	r := node.getResourceNode()
 	if !node.HasParent() {
-		return r.SubtreeQuota[fr] - r.Usage[fr]
+		return r.SubtreeQuota[fr] - r.Usage[fr], true
 	}
 	localAvailable := max(0, r.guaranteedQuota(fr)-r.Usage[fr])
-	parentAvailable := available(node.parentHRN(), fr)
+	parentAvailable, parentIsRoot := available(node.parentHRN(), fr)
 
 	if borrowingLimit := r.Quotas[fr].BorrowingLimit; borrowingLimit != nil {
 		storedInParent := r.SubtreeQuota[fr] - r.guaranteedQuota(fr)
 		usedInParent := max(0, r.Usage[fr]-r.guaranteedQuota(fr))
 		withMaxFromParent := storedInParent - usedInParent + *borrowingLimit
+		if parentAvailable >= withMaxFromParent {
+			parentIsRoot = false
+		}
 		parentAvailable = min(withMaxFromParent, parentAvailable)
 	}
-	return localAvailable + parentAvailable
+	return localAvailable + parentAvailable, parentIsRoot
 }
 
 // potentialAvailable returns the maximum capacity available to this node,

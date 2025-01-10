@@ -35,6 +35,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/pkg/cache"
 	"sigs.k8s.io/kueue/pkg/features"
+	leptonapis "sigs.k8s.io/kueue/pkg/lepton/apis"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
@@ -604,7 +605,7 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 	var status Status
 
 	borrow := a.cq.BorrowingWith(fr, val) && a.cq.HasParent()
-	available := a.cq.Available(fr)
+	available, availableFromRoot := a.cq.AvailableV2(fr)
 	maxCapacity := a.cq.PotentialAvailable(fr)
 
 	// No Fit
@@ -621,17 +622,25 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 
 	// Check if preemption is possible
 	mode := noFit
-	if val <= rQuota.Nominal {
+	if leptonapis.CanPreempt(a.wl.Obj) {
 		mode = preempt
-		if a.oracle.IsReclaimPossible(log, a.cq, *a.wl, fr, val) {
-			mode = reclaim
+	} else {
+		if val <= rQuota.Nominal {
+			mode = preempt
+			if a.oracle.IsReclaimPossible(log, a.cq, *a.wl, fr, val) {
+				mode = reclaim
+			}
+		} else if a.canPreemptWhileBorrowing() {
+			mode = preempt
 		}
-	} else if a.canPreemptWhileBorrowing() {
-		mode = preempt
 	}
 
-	status.append(fmt.Sprintf("insufficient unused quota for %s in flavor %s, %s more needed",
-		fr.Resource, fr.Flavor, resources.ResourceQuantityString(fr.Resource, val-available)))
+	msg := fmt.Sprintf("insufficient unused quota for %s in flavor %s, %s more needed",
+		fr.Resource, fr.Flavor, resources.ResourceQuantityString(fr.Resource, val-available))
+	if availableFromRoot {
+		msg += " from root"
+	}
+	status.append(msg)
 
 	return mode, borrow, &status
 }

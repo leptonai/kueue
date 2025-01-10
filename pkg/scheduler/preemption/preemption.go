@@ -38,6 +38,7 @@ import (
 	config "sigs.k8s.io/kueue/apis/config/v1beta1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/pkg/cache"
+	leptonapis "sigs.k8s.io/kueue/pkg/lepton/apis"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/scheduler/flavorassigner"
@@ -116,7 +117,21 @@ type Target struct {
 func (p *Preemptor) GetTargets(log logr.Logger, wl workload.Info, assignment flavorassigner.Assignment, snapshot *cache.Snapshot) []*Target {
 	frsNeedPreemption := flavorResourcesNeedPreemption(assignment)
 	requests := assignment.TotalRequestsFor(&wl)
+	if leptonapis.CanPreempt(wl.Obj) {
+		return p.getTargetsByLepton(log, wl, requests, frsNeedPreemption, snapshot)
+	}
 	return p.getTargets(log, wl, requests, frsNeedPreemption, snapshot)
+}
+
+func (p *Preemptor) getTargetsByLepton(log logr.Logger, wl workload.Info, requests resources.FlavorResourceQuantities,
+	frsNeedPreemption sets.Set[resources.FlavorResource], snapshot *cache.Snapshot) []*Target {
+	cq := snapshot.ClusterQueues[wl.ClusterQueue]
+	candidates := p.findCandidatesByLepton(wl.Obj, cq, frsNeedPreemption)
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, candidatesOrderingByLepton(candidates, cq.Name, p.clock.Now()))
+	return minimalPreemptions(log, requests, cq, snapshot, frsNeedPreemption, candidates, true, nil)
 }
 
 func (p *Preemptor) getTargets(log logr.Logger, wl workload.Info, requests resources.FlavorResourceQuantities,
@@ -483,6 +498,52 @@ func flavorResourcesNeedPreemption(assignment flavorassigner.Assignment) sets.Se
 	return resPerFlavor
 }
 
+func (p *Preemptor) findCandidatesByLepton(wl *kueue.Workload, cq *cache.ClusterQueueSnapshot, frsNeedPreemption sets.Set[resources.FlavorResource]) []*workload.Info {
+	var candidates []*workload.Info
+	preemptionStrategy := leptonapis.GetQueuePreemptionStrategy(cq.Annotations)
+
+	for _, candidateWl := range cq.Workloads {
+		if canBeCandidateByLepton(preemptionStrategy, wl, candidateWl, frsNeedPreemption) {
+			candidates = append(candidates, candidateWl)
+		}
+	}
+
+	if cq.HasParent() {
+		for _, cohortCQ := range cq.Parent().Root().SubtreeClusterQueues() {
+			if cq == cohortCQ {
+				continue
+			}
+			for _, candidateWl := range cohortCQ.Workloads {
+				if canBeCandidateByLepton(preemptionStrategy, wl, candidateWl, frsNeedPreemption) {
+					candidates = append(candidates, candidateWl)
+				}
+			}
+		}
+	}
+	return candidates
+}
+
+func canBeCandidateByLepton(preemptionStrategy leptonapis.PreemptionStrategy, selfWl *kueue.Workload, candidateWl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
+	selfPriority := priority.Priority(selfWl)
+	candidatePriority := priority.Priority(candidateWl.Obj)
+	if !leptonapis.CanBePreempted(candidateWl.Obj) {
+		return false
+	}
+	if candidatePriority >= selfPriority {
+		return false
+	}
+	if !workloadUsesResources(candidateWl, frsNeedPreemption) {
+		return false
+	}
+	if !preemptionStrategy.CrossNamespaces && selfWl.Namespace != candidateWl.Obj.Namespace {
+		return false
+	}
+	if preemptionStrategy.MaxPriorityThreshold != nil && candidatePriority > *preemptionStrategy.MaxPriorityThreshold {
+		return false
+	}
+	return true
+}
+
 // findCandidates obtains candidates for preemption within the ClusterQueue and
 // cohort that respect the preemption policy and are using a resource that the
 // preempting workload needs.
@@ -577,6 +638,40 @@ func queueUnderNominalInResourcesNeedingPreemption(frsNeedPreemption sets.Set[re
 		}
 	}
 	return true
+}
+
+// candidatesOrdering criteria:
+// 0. Workloads already marked for preemption first.
+// 1. Workloads in the same ClusterQueue before the ones from other ClusterQueues in the cohort as the preemptor.
+// 2. Workloads with lower priority first.
+// 3. Workloads admitted more recently first.
+func candidatesOrderingByLepton(candidates []*workload.Info, cq string, now time.Time) func(int, int) bool {
+	return func(i, j int) bool {
+		a := candidates[i]
+		b := candidates[j]
+		aEvicted := meta.IsStatusConditionTrue(a.Obj.Status.Conditions, kueue.WorkloadEvicted)
+		bEvicted := meta.IsStatusConditionTrue(b.Obj.Status.Conditions, kueue.WorkloadEvicted)
+		if aEvicted != bEvicted {
+			return aEvicted
+		}
+		aInCQ := a.ClusterQueue == cq
+		bInCQ := b.ClusterQueue == cq
+		if aInCQ != bInCQ {
+			return aInCQ
+		}
+		pa := priority.Priority(a.Obj)
+		pb := priority.Priority(b.Obj)
+		if pa != pb {
+			return pa < pb
+		}
+		timeA := quotaReservationTime(a.Obj, now)
+		timeB := quotaReservationTime(b.Obj, now)
+		if !timeA.Equal(timeB) {
+			return timeA.After(timeB)
+		}
+		// Arbitrary comparison for deterministic sorting.
+		return a.Obj.UID < b.Obj.UID
+	}
 }
 
 // candidatesOrdering criteria:

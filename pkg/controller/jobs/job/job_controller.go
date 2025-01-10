@@ -20,9 +20,11 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -38,8 +40,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
+	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/core/indexer"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
+	podcontroller "sigs.k8s.io/kueue/pkg/controller/jobs/pod"
 	"sigs.k8s.io/kueue/pkg/podset"
 	clientutil "sigs.k8s.io/kueue/pkg/util/client"
 )
@@ -165,9 +169,57 @@ func (j *Job) Suspend() {
 	j.Spec.Suspend = ptr.To(true)
 }
 
-func (j *Job) Stop(ctx context.Context, c client.Client, podSetsInfo []podset.PodSetInfo, _ jobframework.StopReason, _ string) (bool, error) {
+func (j *Job) Stop(ctx context.Context, c client.Client, podSetsInfo []podset.PodSetInfo, stopReason jobframework.StopReason, eventMsg string) (bool, error) {
 	object := j.Object()
 	stoppedNow := false
+
+	// Lepton: patch preempted condition to all pods belong to this job
+	podList := &corev1.PodList{}
+	if err := c.List(ctx, podList, client.InNamespace(j.Namespace), client.MatchingFields{"LepPodOwnerRefUID": string(j.UID)}); err != nil {
+		return false, fmt.Errorf("failed to list pods: %w", err)
+	}
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if !pod.DeletionTimestamp.IsZero() ||
+			pod.Status.Phase == corev1.PodFailed ||
+			pod.Status.Phase == corev1.PodSucceeded {
+			continue
+		}
+		var exists bool
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == podcontroller.ConditionTypeTerminationTarget {
+				exists = true
+				break
+			}
+		}
+		if exists {
+			continue
+		}
+		pCopy := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:       pod.UID,
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+			},
+			TypeMeta: pod.TypeMeta,
+			Status: corev1.PodStatus{
+				Conditions: []corev1.PodCondition{
+					{
+						Type:   podcontroller.ConditionTypeTerminationTarget,
+						Status: corev1.ConditionTrue,
+						LastTransitionTime: metav1.Time{
+							Time: time.Now(),
+						},
+						Reason:  string(stopReason),
+						Message: eventMsg,
+					},
+				},
+			},
+		}
+		if err := c.Status().Patch(ctx, pCopy, client.Apply, client.FieldOwner(constants.KueueName)); err != nil && !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("failed to patch pod %s status before suspending job: %w", pod.Name, err)
+		}
+	}
 
 	if !j.IsSuspended() {
 		if err := clientutil.Patch(ctx, c, object, true, func() (bool, error) {
@@ -344,6 +396,20 @@ func (j *Job) syncCompletionWithParallelism() bool {
 
 func SetupIndexes(ctx context.Context, fieldIndexer client.FieldIndexer) error {
 	if err := fieldIndexer.IndexField(ctx, &batchv1.Job{}, indexer.OwnerReferenceUID, indexer.IndexOwnerUID); err != nil {
+		return err
+	}
+	if err := fieldIndexer.IndexField(ctx, &corev1.Pod{}, "LepPodOwnerRefUID", func(o client.Object) []string {
+		pod, ok := o.(*corev1.Pod)
+		if !ok {
+			return nil
+		}
+
+		ownerRef := metav1.GetControllerOf(pod)
+		if ownerRef == nil {
+			return nil
+		}
+		return []string{string(ownerRef.UID)}
+	}); err != nil {
 		return err
 	}
 	return jobframework.SetupWorkloadOwnerIndex(ctx, fieldIndexer, gvk)
