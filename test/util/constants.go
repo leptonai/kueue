@@ -17,6 +17,7 @@ limitations under the License.
 package util
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -26,7 +27,7 @@ import (
 const (
 	TinyTimeout  = 10 * time.Millisecond
 	ShortTimeout = time.Second
-	Timeout      = 5 * time.Second
+	Timeout      = 10 * time.Second
 	// LongTimeout is meant for E2E tests when waiting for complex operations
 	// such as running pods to completion.
 	LongTimeout = 45 * time.Second
@@ -45,4 +46,14 @@ var (
 	IgnoreConditionTimestampsAndObservedGeneration = cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime", "ObservedGeneration")
 	IgnoreConditionMessage                         = cmpopts.IgnoreFields(metav1.Condition{}, "Message")
 	IgnoreObjectMetaResourceVersion                = cmpopts.IgnoreFields(metav1.ObjectMeta{}, "ResourceVersion")
+)
+
+var (
+	AutoscalerCrds       = filepath.Join(GetProjectBaseDir(), "dep-crds", "cluster-autoscaler")
+	JobsetCrds           = filepath.Join(GetProjectBaseDir(), "dep-crds", "jobset-operator")
+	TrainingOperatorCrds = filepath.Join(GetProjectBaseDir(), "dep-crds", "training-operator-crds")
+	MpiOperatorCrds      = filepath.Join(GetProjectBaseDir(), "dep-crds", "mpi-operator")
+	AppWrapperCrds       = filepath.Join(GetProjectBaseDir(), "dep-crds", "appwrapper-crds")
+	RayOperatorCrds      = filepath.Join(GetProjectBaseDir(), "dep-crds", "ray-operator-crds")
+	WebhookPath          = filepath.Join(GetProjectBaseDir(), "config", "components", "webhook")
 )

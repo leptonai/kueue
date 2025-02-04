@@ -20,11 +20,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -96,12 +94,6 @@ func (c *clusterQueue) GetName() string {
 	return c.Name
 }
 
-// implement dominantResourceShareNode interface
-
-func (c *clusterQueue) parentResources() ResourceNode {
-	return c.Parent().resourceNode
-}
-
 // implements hierarchicalResourceNode interface.
 
 func (c *clusterQueue) getResourceNode() ResourceNode {
@@ -116,9 +108,8 @@ type queue struct {
 	key                string
 	reservingWorkloads int
 	admittedWorkloads  int
-	//TODO: rename this to better distinguish between reserved and "in use" quantities
-	usage         resources.FlavorResourceQuantities
-	admittedUsage resources.FlavorResourceQuantities
+	totalReserved      resources.FlavorResourceQuantities
+	admittedUsage      resources.FlavorResourceQuantities
 }
 
 func (c *clusterQueue) Active() bool {
@@ -551,7 +542,7 @@ func (c *clusterQueue) updateWorkloadUsage(wi *workload.Info, m int64) {
 	}
 	qKey := workload.QueueKey(wi.Obj)
 	if lq, ok := c.localQueues[qKey]; ok {
-		updateFlavorUsage(frUsage, lq.usage, m)
+		updateFlavorUsage(frUsage, lq.totalReserved, m)
 		lq.reservingWorkloads += int(m)
 		if admitted {
 			updateFlavorUsage(frUsage, lq.admittedUsage, m)
@@ -589,13 +580,13 @@ func (c *clusterQueue) addLocalQueue(q *kueue.LocalQueue) error {
 	qImpl := &queue{
 		key:                qKey,
 		reservingWorkloads: 0,
-		usage:              make(resources.FlavorResourceQuantities),
+		totalReserved:      make(resources.FlavorResourceQuantities),
 	}
 	qImpl.resetFlavorsAndResources(c.resourceNode.Usage, c.AdmittedUsage)
 	for _, wl := range c.Workloads {
 		if workloadBelongsToLocalQueue(wl.Obj, q) {
 			frq := wl.FlavorResourceUsage()
-			updateFlavorUsage(frq, qImpl.usage, 1)
+			updateFlavorUsage(frq, qImpl.totalReserved, 1)
 			qImpl.reservingWorkloads++
 			if workload.IsAdmitted(wl.Obj) {
 				updateFlavorUsage(frq, qImpl.admittedUsage, 1)
@@ -631,7 +622,7 @@ func (c *clusterQueue) flavorInUse(flavor kueue.ResourceFlavorReference) bool {
 
 func (q *queue) resetFlavorsAndResources(cqUsage resources.FlavorResourceQuantities, cqAdmittedUsage resources.FlavorResourceQuantities) {
 	// Clean up removed flavors or resources.
-	q.usage = resetUsage(q.usage, cqUsage)
+	q.totalReserved = resetUsage(q.totalReserved, cqUsage)
 	q.admittedUsage = resetUsage(q.admittedUsage, cqAdmittedUsage)
 }
 
@@ -647,84 +638,8 @@ func workloadBelongsToLocalQueue(wl *kueue.Workload, q *kueue.LocalQueue) bool {
 	return wl.Namespace == q.Namespace && wl.Spec.QueueName == q.Name
 }
 
-// The methods below implement several interfaces. See
-// dominantResourceShareNode, resourceGroupNode, and netQuotaNode.
+// Implements dominantResourceShareNode interface.
 
 func (c *clusterQueue) fairWeight() *resource.Quantity {
 	return &c.FairWeight
-}
-
-func (c *clusterQueue) usageFor(fr resources.FlavorResource) int64 {
-	return c.resourceNode.Usage[fr]
-}
-
-func (c *clusterQueue) QuotaFor(fr resources.FlavorResource) ResourceQuota {
-	return c.resourceNode.Quotas[fr]
-}
-
-func (c *clusterQueue) resourceGroups() []ResourceGroup {
-	return c.ResourceGroups
-}
-
-// DominantResourceShare returns a value from 0 to 1,000,000 representing the maximum of the ratios
-// of usage above nominal quota to the lendable resources in the cohort, among all the resources
-// provided by the ClusterQueue, and divided by the weight.
-// If zero, it means that the usage of the ClusterQueue is below the nominal quota.
-// The function also returns the resource name that yielded this value.
-// Also for a weight of zero, this will return 9223372036854775807.
-func (c *ClusterQueueSnapshot) DominantResourceShare() (int, corev1.ResourceName) {
-	return dominantResourceShare(c, nil, 0)
-}
-
-func (c *ClusterQueueSnapshot) DominantResourceShareWith(wlReq resources.FlavorResourceQuantities) (int, corev1.ResourceName) {
-	return dominantResourceShare(c, wlReq, 1)
-}
-
-func (c *ClusterQueueSnapshot) DominantResourceShareWithout(wlReq resources.FlavorResourceQuantities) (int, corev1.ResourceName) {
-	return dominantResourceShare(c, wlReq, -1)
-}
-
-type dominantResourceShareNode interface {
-	HasParent() bool
-	parentResources() ResourceNode
-	fairWeight() *resource.Quantity
-
-	netQuotaNode
-}
-
-func dominantResourceShare(node dominantResourceShareNode, wlReq resources.FlavorResourceQuantities, m int64) (int, corev1.ResourceName) {
-	if !node.HasParent() {
-		return 0, ""
-	}
-	if node.fairWeight().IsZero() {
-		return math.MaxInt, ""
-	}
-
-	borrowing := make(map[corev1.ResourceName]int64)
-	for fr, quota := range remainingQuota(node) {
-		b := m*wlReq[fr] - quota
-		if b > 0 {
-			borrowing[fr.Resource] += b
-		}
-	}
-	if len(borrowing) == 0 {
-		return 0, ""
-	}
-
-	var drs int64 = -1
-	var dRes corev1.ResourceName
-
-	lendable := node.parentResources().calculateLendable()
-	for rName, b := range borrowing {
-		if lr := lendable[rName]; lr > 0 {
-			ratio := b * 1000 / lr
-			// Use alphabetical order to get a deterministic resource name.
-			if ratio > drs || (ratio == drs && rName < dRes) {
-				drs = ratio
-				dRes = rName
-			}
-		}
-	}
-	dws := drs * 1000 / node.fairWeight().MilliValue()
-	return int(dws), dRes
 }

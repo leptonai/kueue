@@ -37,15 +37,15 @@ Read the [overview](https://kueue.sigs.k8s.io/docs/overview/) and watch the Kueu
   - ✔️ Unit Test [testgrid](https://testgrid.k8s.io/sig-scheduling#periodic-kueue-test-unit-main).
   - ✔️ Integration Test [testgrid](https://testgrid.k8s.io/sig-scheduling#periodic-kueue-test-integration-main)
   - ✔️ E2E Tests for Kubernetes
-    [1.28](https://testgrid.k8s.io/sig-scheduling#periodic-kueue-test-e2e-main-1-28),
     [1.29](https://testgrid.k8s.io/sig-scheduling#periodic-kueue-test-e2e-main-1-29),
     [1.30](https://testgrid.k8s.io/sig-scheduling#periodic-kueue-test-e2e-main-1-30),
     [1.31](https://testgrid.k8s.io/sig-scheduling#periodic-kueue-test-e2e-main-1-31),
+    [1.32](https://testgrid.k8s.io/sig-scheduling#periodic-kueue-test-e2e-main-1-32),
     on Kind.
 - ✔️ Scalability verification via [performance tests](https://github.com/kubernetes-sigs/kueue/tree/main/test/performance).
 - ✔️ Monitoring via [metrics](https://kueue.sigs.k8s.io/docs/reference/metrics).
 - ✔️ Security: RBAC based accessibility.
-- ✔️ Stable release cycle(2-3 months) for new features, bugfixes, cleanups.
+- ✔️ Stable [release](RELEASE.md) cycle (2-3 months).
 - ✔️ [Adopters](https://kueue.sigs.k8s.io/docs/adopters/) running on production.
 
   _Based on community feedback, we continue to simplify and evolve the API to
@@ -58,7 +58,7 @@ Read the [overview](https://kueue.sigs.k8s.io/docs/overview/) and watch the Kueu
 To install the latest release of Kueue in your cluster, run the following command:
 
 ```shell
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.10.0/manifests.yaml
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.10.1/manifests.yaml
 ```
 
 The controller runs in the `kueue-system` namespace.
@@ -67,7 +67,7 @@ Read the [installation guide](https://kueue.sigs.k8s.io/docs/installation/) to l
 
 ## Usage
 
-A minimal configuration can be set by running the [examples](examples):
+A minimal configuration can be set by running the [examples](site/static/examples):
 
 ```shell
 kubectl apply -f examples/admin/single-clusterqueue-setup.yaml
@@ -133,6 +133,10 @@ You can reach the maintainers of this project at:
 
 - [Slack](https://kubernetes.slack.com/messages/wg-batch)
 - [Mailing List](https://groups.google.com/a/kubernetes.io/g/wg-batch)
+
+### Graphic assets
+
+- [Logos](https://github.com/cncf/artwork/tree/main/projects/kueue)
 
 ### Code of conduct
 

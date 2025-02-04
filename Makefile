@@ -77,7 +77,7 @@ LD_FLAGS += -X '$(version_pkg).GitCommit=$(shell git rev-parse HEAD)'
 
 # Update these variables when preparing a new release or a release branch.
 # Then run `make prepare-release-branch`
-RELEASE_VERSION=v0.10.0
+RELEASE_VERSION=v0.10.1
 RELEASE_BRANCH=main
 
 .PHONY: all
@@ -266,8 +266,7 @@ artifacts: kustomize yq helm ## Generate release artifacts.
 	$(KUSTOMIZE) build config/dev -o artifacts/manifests-dev.yaml
 	$(KUSTOMIZE) build config/alpha-enabled -o artifacts/manifests-alpha-enabled.yaml
 	$(KUSTOMIZE) build config/prometheus -o artifacts/prometheus.yaml
-	$(KUSTOMIZE) build config/visibility-apf/default -o artifacts/visibility-apf.yaml
-	$(KUSTOMIZE) build config/visibility-apf/1_28 -o artifacts/visibility-apf-1-28.yaml
+	$(KUSTOMIZE) build config/visibility-apf -o artifacts/visibility-apf.yaml
 	@$(call clean-manifests)
 	# Update the image tag and policy
 	$(YQ)  e  '.controllerManager.manager.image.repository = "$(IMAGE_REPO)" | .controllerManager.manager.image.tag = "$(GIT_TAG)" | .controllerManager.manager.image.pullPolicy = "IfNotPresent"' -i charts/kueue/values.yaml
@@ -300,7 +299,9 @@ update-security-insights: yq
 # Developers don't need to build this image, as it will be available as us-central1-docker.pkg.dev/k8s-staging-images/kueue/debug
 .PHONY: debug-image-push
 debug-image-push: ## Build and push the debug image to the registry
-	$(IMAGE_BUILD_CMD) -t $(IMAGE_REGISTRY)/debug:$(GIT_TAG) \
+	$(IMAGE_BUILD_CMD) \
+		-t $(IMAGE_REGISTRY)/debug:$(GIT_TAG) \
+		-t $(IMAGE_REGISTRY)/debug:$(RELEASE_BRANCH) \
 		--platform=$(PLATFORMS) \
 		--push ./hack/debugpod
 

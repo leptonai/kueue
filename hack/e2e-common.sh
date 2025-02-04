@@ -21,6 +21,11 @@ export YQ="$ROOT_DIR"/bin/yq
 
 export KIND_VERSION="${E2E_KIND_VERSION/"kindest/node:v"/}"
 
+if [[ -n ${APPWRAPPER_VERSION:-} ]]; then
+    export APPWRAPPER_MANIFEST=${ROOT_DIR}/dep-crds/appwrapper/config/standalone
+    APPWRAPPER_IMAGE=quay.io/ibm/appwrapper:${APPWRAPPER_VERSION}
+fi
+
 if [[ -n ${JOBSET_VERSION:-} ]]; then
     export JOBSET_MANIFEST="https://github.com/kubernetes-sigs/jobset/releases/download/${JOBSET_VERSION}/manifests.yaml"
     export JOBSET_IMAGE=registry.k8s.io/jobset/jobset:${JOBSET_VERSION}
@@ -38,6 +43,19 @@ fi
 if [[ -n ${KUBEFLOW_MPI_VERSION:-} ]]; then
     export KUBEFLOW_MPI_MANIFEST="https://raw.githubusercontent.com/kubeflow/mpi-operator/${KUBEFLOW_MPI_VERSION}/deploy/v2beta1/mpi-operator.yaml"
     export KUBEFLOW_MPI_IMAGE=mpioperator/mpi-operator:${KUBEFLOW_MPI_VERSION/#v}
+fi
+
+if [[ -n ${KUBERAY_VERSION:-} ]]; then
+    export KUBERAY_MANIFEST="${ROOT_DIR}/dep-crds/ray-operator/default/"
+    export KUBERAY_IMAGE=bitnami/kuberay-operator:${KUBERAY_VERSION/#v}
+    export KUBERAY_RAY_IMAGE=rayproject/ray:2.9.0
+    export KUBERAY_RAY_IMAGE_ARM=rayproject/ray:2.9.0-aarch64
+    export KUBERAY_CRDS=${ROOT_DIR}/dep-crds/ray-operator/crd/bases
+fi
+
+if [[ -n ${LEADERWORKERSET_VERSION:-} ]]; then
+    export LEADERWORKERSET_MANIFEST="https://github.com/kubernetes-sigs/lws/releases/download/${LEADERWORKERSET_VERSION}/manifests.yaml"
+    export LEADERWORKERSET_IMAGE=registry.k8s.io/lws/lws:${LEADERWORKERSET_VERSION}
 fi
 
 # sleep image to use for testing.
@@ -80,6 +98,9 @@ function prepare_docker_images {
     docker tag $E2E_TEST_SLEEP_IMAGE "$E2E_TEST_SLEEP_IMAGE_WITHOUT_SHA"
     docker tag $E2E_TEST_CURL_IMAGE "$E2E_TEST_CURL_IMAGE_WITHOUT_SHA"
 
+    if [[ -n ${APPWRAPPER_VERSION:-} ]]; then
+        docker pull "${APPWRAPPER_IMAGE}"
+    fi
     if [[ -n ${JOBSET_VERSION:-} ]]; then
         docker pull "${JOBSET_IMAGE}"
     fi
@@ -88,6 +109,20 @@ function prepare_docker_images {
     fi
     if [[ -n ${KUBEFLOW_MPI_VERSION:-} ]]; then
         docker pull "${KUBEFLOW_MPI_IMAGE}"
+    fi
+    if [[ -n ${KUBERAY_VERSION:-} ]]; then
+        docker pull "${KUBERAY_IMAGE}"
+
+        # Extra e2e images required for Kuberay
+        unamestr=$(uname)
+        if [[ "$unamestr" == 'Linux' ]]; then
+            docker pull "${KUBERAY_RAY_IMAGE}"
+        elif [[ "$unamestr" == 'Darwin' ]]; then
+            docker pull "${KUBERAY_RAY_IMAGE_ARM}"
+        fi
+    fi
+    if [[ -n ${LEADERWORKERSET_VERSION:-} ]]; then
+        docker pull "${LEADERWORKERSET_IMAGE}"
     fi
 }
 
@@ -108,11 +143,14 @@ function cluster_kind_load_image {
 # $1 cluster
 function cluster_kueue_deploy {
     kubectl config use-context "kind-${1}"
-    if [ "${KIND_VERSION%.*}" = "1.28" ]; then
-        kubectl apply --server-side -k test/e2e/config/1_28
-    else
-        kubectl apply --server-side -k test/e2e/config/default
-    fi
+    kubectl apply --server-side -k test/e2e/config/default
+}
+
+#$1 - cluster name
+function install_appwrapper {
+    cluster_kind_load_image "${1}" "${APPWRAPPER_IMAGE}"
+    kubectl config use-context "kind-${1}"
+    kubectl apply -k "${APPWRAPPER_MANIFEST}"
 }
 
 #$1 - cluster name
@@ -126,7 +164,7 @@ function install_jobset {
 function install_kubeflow {
     cluster_kind_load_image "${1}" "${KUBEFLOW_IMAGE}"
     kubectl config use-context "kind-${1}"
-    kubectl apply -k "${KUBEFLOW_MANIFEST_WORKER}"
+    kubectl apply --server-side -k "${KUBEFLOW_MANIFEST_WORKER}"
 }
 
 #$1 - cluster name
@@ -134,6 +172,28 @@ function install_mpi {
     cluster_kind_load_image "${1}" "${KUBEFLOW_MPI_IMAGE/#v}"
     kubectl config use-context "kind-${1}"
     kubectl apply --server-side -f "${KUBEFLOW_MPI_MANIFEST}"
+}
+
+#$1 - cluster name
+function install_kuberay {
+    # Extra e2e images required for Kuberay
+    unamestr=$(uname)
+    if [[ "$unamestr" == 'Linux' ]]; then
+        cluster_kind_load_image "${1}" "${KUBERAY_RAY_IMAGE}"
+    elif [[ "$unamestr" == 'Darwin' ]]; then
+        cluster_kind_load_image "${1}" "${KUBERAY_RAY_IMAGE_ARM}"
+    fi 
+
+    cluster_kind_load_image "${1}" "${KUBERAY_IMAGE}"
+    kubectl config use-context "kind-${1}"
+    # create used instead of apply - https://github.com/ray-project/kuberay/issues/504
+    kubectl create -k "${KUBERAY_MANIFEST}"
+}
+
+function install_lws {
+    cluster_kind_load_image "${1}" "${LEADERWORKERSET_IMAGE/#v}"
+    kubectl config use-context "kind-${1}"
+    kubectl apply --server-side -f "${LEADERWORKERSET_MANIFEST}"
 }
 
 INITIAL_IMAGE=$($YQ '.images[] | select(.name == "controller") | [.newName, .newTag] | join(":")' config/components/manager/kustomization.yaml)

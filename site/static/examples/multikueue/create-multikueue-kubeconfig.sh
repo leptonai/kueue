@@ -52,6 +52,16 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - jobset.x-k8s.io
   resources:
   - jobsets
@@ -163,6 +173,38 @@ rules:
   - kubeflow.org
   resources:
   - mpijobs/status
+  verbs:
+  - get
+- apiGroups:
+  - ray.io
+  resources:
+  - rayjobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ray.io
+  resources:
+  - rayjobs/status
+  verbs:
+  - get
+- apiGroups:
+  - ray.io
+  resources:
+  - rayclusters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ray.io
+  resources:
+  - rayclusters/status
   verbs:
   - get
 ---

@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
@@ -284,6 +285,14 @@ func (w *WorkloadWrapper) Label(k, v string) *WorkloadWrapper {
 	return w
 }
 
+func (w *WorkloadWrapper) Annotation(k, v string) *WorkloadWrapper {
+	if w.ObjectMeta.Annotations == nil {
+		w.ObjectMeta.Annotations = make(map[string]string)
+	}
+	w.ObjectMeta.Annotations[k] = v
+	return w
+}
+
 func (w *WorkloadWrapper) AdmissionChecks(checks ...kueue.AdmissionCheckState) *WorkloadWrapper {
 	w.Status.AdmissionChecks = checks
 	return w
@@ -300,24 +309,12 @@ func (w *WorkloadWrapper) Conditions(conditions ...metav1.Condition) *WorkloadWr
 }
 
 func (w *WorkloadWrapper) ControllerReference(gvk schema.GroupVersionKind, name, uid string) *WorkloadWrapper {
-	w.appendOwnerReference(gvk, name, uid, ptr.To(true), ptr.To(true))
+	appendOwnerReference(&w.Workload, gvk, name, uid, ptr.To(true), ptr.To(true))
 	return w
 }
 
 func (w *WorkloadWrapper) OwnerReference(gvk schema.GroupVersionKind, name, uid string) *WorkloadWrapper {
-	w.appendOwnerReference(gvk, name, uid, nil, nil)
-	return w
-}
-
-func (w *WorkloadWrapper) appendOwnerReference(gvk schema.GroupVersionKind, name, uid string, controller, blockDeletion *bool) *WorkloadWrapper {
-	w.OwnerReferences = append(w.OwnerReferences, metav1.OwnerReference{
-		APIVersion:         gvk.GroupVersion().String(),
-		Kind:               gvk.Kind,
-		Name:               name,
-		UID:                types.UID(uid),
-		Controller:         controller,
-		BlockOwnerDeletion: blockDeletion,
-	})
+	appendOwnerReference(&w.Workload, gvk, name, uid, nil, nil)
 	return w
 }
 
@@ -386,6 +383,11 @@ func MakePodSet(name string, count int) *PodSetWrapper {
 			},
 		},
 	}
+}
+
+func (p *PodSetWrapper) PodSpec(ps corev1.PodSpec) *PodSetWrapper {
+	p.Template.Spec = ps
+	return p
 }
 
 func (p *PodSetWrapper) PriorityClass(pc string) *PodSetWrapper {
@@ -548,18 +550,33 @@ func (w *AdmissionWrapper) Obj() *kueue.Admission {
 }
 
 func (w *AdmissionWrapper) Assignment(r corev1.ResourceName, f kueue.ResourceFlavorReference, value string) *AdmissionWrapper {
-	w.PodSetAssignments[0].Flavors[r] = f
-	w.PodSetAssignments[0].ResourceUsage[r] = resource.MustParse(value)
+	w.AssignmentWithIndex(0, r, f, value)
 	return w
 }
 
 func (w *AdmissionWrapper) AssignmentPodCount(value int32) *AdmissionWrapper {
-	w.PodSetAssignments[0].Count = ptr.To(value)
+	w.AssignmentPodCountWithIndex(0, value)
 	return w
 }
 
 func (w *AdmissionWrapper) TopologyAssignment(ts *kueue.TopologyAssignment) *AdmissionWrapper {
-	w.PodSetAssignments[0].TopologyAssignment = ts
+	w.TopologyAssignmentWithIndex(0, ts)
+	return w
+}
+
+func (w *AdmissionWrapper) AssignmentWithIndex(index int32, r corev1.ResourceName, f kueue.ResourceFlavorReference, value string) *AdmissionWrapper {
+	w.PodSetAssignments[index].Flavors[r] = f
+	w.PodSetAssignments[index].ResourceUsage[r] = resource.MustParse(value)
+	return w
+}
+
+func (w *AdmissionWrapper) AssignmentPodCountWithIndex(index, value int32) *AdmissionWrapper {
+	w.PodSetAssignments[index].Count = ptr.To(value)
+	return w
+}
+
+func (w *AdmissionWrapper) TopologyAssignmentWithIndex(index int32, ts *kueue.TopologyAssignment) *AdmissionWrapper {
+	w.PodSetAssignments[index].TopologyAssignment = ts
 	return w
 }
 
@@ -643,6 +660,13 @@ func (q *LocalQueueWrapper) Generation(num int64) *LocalQueueWrapper {
 	return q
 }
 
+// GeneratedName sets the prefix for the server to generate unique name.
+// No name should be given in the MakeClusterQueue for the GeneratedName to work.
+func (q *LocalQueueWrapper) GeneratedName(name string) *LocalQueueWrapper {
+	q.ObjectMeta.GenerateName = name
+	return q
+}
+
 type CohortWrapper struct {
 	kueuealpha.Cohort
 }
@@ -707,6 +731,13 @@ func (c *ClusterQueueWrapper) AdmissionCheckStrategy(acs ...kueue.AdmissionCheck
 		c.Spec.AdmissionChecksStrategy = &kueue.AdmissionChecksStrategy{}
 	}
 	c.Spec.AdmissionChecksStrategy.AdmissionChecks = acs
+	return c
+}
+
+// GeneratedName sets the prefix for the server to generate unique name.
+// No name should be given in the MakeClusterQueue for the GeneratedName to work.
+func (c *ClusterQueueWrapper) GeneratedName(name string) *ClusterQueueWrapper {
+	c.ObjectMeta.GenerateName = name
 	return c
 }
 
@@ -1390,4 +1421,69 @@ func (prc *ProvisioningRequestConfigWrapper) Clone() *ProvisioningRequestConfigW
 
 func (prc *ProvisioningRequestConfigWrapper) Obj() *kueue.ProvisioningRequestConfig {
 	return &prc.ProvisioningRequestConfig
+}
+
+type PodTemplateWrapper struct {
+	corev1.PodTemplate
+}
+
+func MakePodTemplate(name, namespace string) *PodTemplateWrapper {
+	return &PodTemplateWrapper{
+		corev1.PodTemplate{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+		},
+	}
+}
+
+func (w *PodTemplateWrapper) Obj() *corev1.PodTemplate {
+	return &w.PodTemplate
+}
+
+func (w *PodTemplateWrapper) Clone() *PodTemplateWrapper {
+	return &PodTemplateWrapper{PodTemplate: *w.DeepCopy()}
+}
+
+func (w *PodTemplateWrapper) Label(k, v string) *PodTemplateWrapper {
+	if w.ObjectMeta.Labels == nil {
+		w.ObjectMeta.Labels = make(map[string]string)
+	}
+	w.ObjectMeta.Labels[k] = v
+	return w
+}
+
+func (w *PodTemplateWrapper) Containers(containers ...corev1.Container) *PodTemplateWrapper {
+	w.Template.Spec.Containers = containers
+	return w
+}
+
+func (w *PodTemplateWrapper) NodeSelector(k, v string) *PodTemplateWrapper {
+	if w.Template.Spec.NodeSelector == nil {
+		w.Template.Spec.NodeSelector = make(map[string]string)
+	}
+	w.Template.Spec.NodeSelector[k] = v
+	return w
+}
+
+func (w *PodTemplateWrapper) Toleration(toleration corev1.Toleration) *PodTemplateWrapper {
+	w.Template.Spec.Tolerations = append(w.Template.Spec.Tolerations, toleration)
+	return w
+}
+
+func (w *PodTemplateWrapper) ControllerReference(gvk schema.GroupVersionKind, name, uid string) *PodTemplateWrapper {
+	appendOwnerReference(&w.PodTemplate, gvk, name, uid, ptr.To(true), ptr.To(true))
+	return w
+}
+
+func appendOwnerReference(obj client.Object, gvk schema.GroupVersionKind, name, uid string, controller, blockDeletion *bool) {
+	obj.SetOwnerReferences(append(obj.GetOwnerReferences(), metav1.OwnerReference{
+		APIVersion:         gvk.GroupVersion().String(),
+		Kind:               gvk.Kind,
+		Name:               name,
+		UID:                types.UID(uid),
+		Controller:         controller,
+		BlockOwnerDeletion: blockDeletion,
+	}))
 }

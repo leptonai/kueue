@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	kftraining "github.com/kubeflow/training-operator/pkg/apis/kubeflow.org/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	awv1beta2 "github.com/project-codeflare/appwrapper/api/v1beta2"
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	autoscaling "k8s.io/autoscaler/cluster-autoscaler/apis/provisioningrequest/autoscaling.x-k8s.io/v1beta1"
@@ -55,7 +57,6 @@ import (
 type ManagerSetup func(context.Context, manager.Manager)
 
 type Framework struct {
-	CRDPath               string
 	DepCRDPaths           []string
 	WebhookPath           string
 	APIServerFeatureGates []string
@@ -76,8 +77,9 @@ func (f *Framework) Init() *rest.Config {
 
 	var cfg *rest.Config
 	ginkgo.By("bootstrapping test environment", func() {
+		baseCrdPath := filepath.Join(util.GetProjectBaseDir(), "config", "components", "crd", "bases")
 		f.testEnv = &envtest.Environment{
-			CRDDirectoryPaths:     append(f.DepCRDPaths, f.CRDPath),
+			CRDDirectoryPaths:     append(f.DepCRDPaths, baseCrdPath),
 			ErrorIfCRDPathMissing: true,
 		}
 		if len(f.WebhookPath) > 0 {
@@ -112,6 +114,9 @@ func (f *Framework) SetupClient(cfg *rest.Config) (context.Context, client.Clien
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 
 	err = kueuealpha.AddToScheme(f.scheme)
+	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
+
+	err = awv1beta2.AddToScheme(f.scheme)
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
 
 	err = kfmpi.AddToScheme(f.scheme)

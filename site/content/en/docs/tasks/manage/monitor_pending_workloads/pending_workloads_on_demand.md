@@ -8,7 +8,7 @@ description: >
 
 This page shows you how to monitor pending workloads with `VisibilityOnDemand` feature.
 
-The intended audience for this page are [batch administrators](/docs/tasks#batch-administrator), and [batch users](/docs/tasks#batch-user) for [Local Queue Visibility section](#local-queue-visibility).
+The intended audience for this page are [batch administrators](/docs/tasks#batch-administrator) for [Cluster Queue visibility section](#cluster-queue-visibility-via-kubectl), and [batch users](/docs/tasks#batch-user) for [Local Queue Visibility section](#local-queue-visibility-via-kubectl).
 
 From version v0.6.0, Kueue provides the ability for a batch administrators to monitor
 the pipeline of pending jobs, and help users to estimate when their jobs will
@@ -24,12 +24,11 @@ Make sure the following conditions are met:
 
 ### Configure API Priority and Fairness:
 
-To install the [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/) configuration for the visibility API apply one of the manifests, depending on your Kubernetes version:
+To install the [API Priority and Fairness](https://kubernetes.io/docs/concepts/cluster-administration/flow-control/) configuration for the visibility API apply manifests:
 
-{{< tabpane lang="shell" persist=disabled >}}
-{{< tab header="Kubernetes 1.29 or newer" >}} kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/{{< param "version" >}}/visibility-apf.yaml {{< /tab >}}
-{{< tab header="Kubernetes 1.28" >}} kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/{{< param "version" >}}/visibility-apf-1-28.yaml {{< /tab >}}
-{{< /tabpane >}}
+```shell
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/{{< param "version" >}}/visibility-apf.yaml
+```
 
 ### Directly accessing the Visibility API
 
@@ -72,6 +71,9 @@ kubectl apply -f https://kueue.sigs.k8s.io/examples/admin/cluster-role-and-bindi
 `VisibilityOnDemand` is a Beta feature enabled by default.
 
 You can disable it by setting the `VisibilityOnDemand` feature gate. Check the [Installation](/docs/installation/#change-the-feature-gates-configuration) guide for details on feature gate configuration.
+
+If you disable the feature, you also need to remove the associated `APIService` from your cluster by doing `kubectl delete APIService v1beta1.visibility.kueue.x-k8s.io`.
+
 {{% /alert %}}
 
 To install a simple setup of ClusterQueue

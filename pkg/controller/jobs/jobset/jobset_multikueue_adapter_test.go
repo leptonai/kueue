@@ -40,13 +40,13 @@ const (
 	TestNamespace = "ns"
 )
 
-func TestMultikueueAdapter(t *testing.T) {
+func TestMultiKueueAdapter(t *testing.T) {
 	objCheckOpts := []cmp.Option{
 		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "ResourceVersion"),
 		cmpopts.EquateEmpty(),
 	}
 
-	baseJobSetBuilder := utiltestingjobset.MakeJobSet("jobset1", TestNamespace)
+	baseJobSetBuilder := utiltestingjobset.MakeJobSet("jobset1", TestNamespace).Suspend(false)
 	baseJobSetManagedByKueueBuilder := baseJobSetBuilder.DeepCopy().ManagedBy(kueue.MultiKueueControllerName)
 
 	cases := map[string]struct {

@@ -399,9 +399,8 @@ func (c *Cache) AddClusterQueue(ctx context.Context, cq *kueue.ClusterQueue) err
 			key:                qKey,
 			reservingWorkloads: 0,
 			admittedWorkloads:  0,
-			//TODO: rename this to better distinguish between reserved and in use quantities
-			usage:         make(resources.FlavorResourceQuantities),
-			admittedUsage: make(resources.FlavorResourceQuantities),
+			totalReserved:      make(resources.FlavorResourceQuantities),
+			admittedUsage:      make(resources.FlavorResourceQuantities),
 		}
 		qImpl.resetFlavorsAndResources(cqImpl.resourceNode.Usage, cqImpl.AdmittedUsage)
 		cqImpl.localQueues[qKey] = qImpl
@@ -680,7 +679,7 @@ func (c *Cache) Usage(cqObj *kueue.ClusterQueue) (*ClusterQueueUsageStats, error
 	}
 
 	if c.fairSharingEnabled {
-		weightedShare, _ := dominantResourceShare(cq, nil, 0)
+		weightedShare, _ := dominantResourceShare(cq, nil)
 		stats.WeightedShare = int64(weightedShare)
 	}
 
@@ -697,7 +696,7 @@ func getUsage(frq resources.FlavorResourceQuantities, cq *clusterQueue) []kueue.
 			}
 			for rName := range rg.CoveredResources {
 				fr := resources.FlavorResource{Flavor: fName, Resource: rName}
-				rQuota := cq.QuotaFor(fr)
+				rQuota := cq.resourceNode.Quotas[fr]
 				used := frq[fr]
 				rUsage := kueue.ResourceUsage{
 					Name:  rName,
@@ -772,7 +771,7 @@ func (c *Cache) LocalQueueUsage(qObj *kueue.LocalQueue) (*LocalQueueUsageStats, 
 	}
 
 	return &LocalQueueUsageStats{
-		ReservedResources:  filterLocalQueueUsage(qImpl.usage, cqImpl.ResourceGroups),
+		ReservedResources:  filterLocalQueueUsage(qImpl.totalReserved, cqImpl.ResourceGroups),
 		ReservingWorkloads: qImpl.reservingWorkloads,
 		AdmittedResources:  filterLocalQueueUsage(qImpl.admittedUsage, cqImpl.ResourceGroups),
 		AdmittedWorkloads:  qImpl.admittedWorkloads,

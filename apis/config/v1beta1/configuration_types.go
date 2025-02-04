@@ -325,14 +325,15 @@ type Integrations struct {
 	//  - "ray.io/rayjob"
 	//  - "ray.io/raycluster"
 	//  - "jobset.x-k8s.io/jobset"
-	//  - "kubeflow.org/mxjob"
 	//  - "kubeflow.org/paddlejob"
 	//  - "kubeflow.org/pytorchjob"
 	//  - "kubeflow.org/tfjob"
 	//  - "kubeflow.org/xgboostjob"
+	//  - "workload.codeflare.dev/appwrapper"
 	//  - "pod"
 	//  - "deployment" (requires enabling pod integration)
 	//  - "statefulset" (requires enabling pod integration)
+	//  - "leaderworkerset.x-k8s.io/leaderworkerset" (requires enabling pod integration)
 	Frameworks []string `json:"frameworks,omitempty"`
 	// List of GroupVersionKinds that are managed for Kueue by external controllers;
 	// the expected format is `Kind.version.group.com`.

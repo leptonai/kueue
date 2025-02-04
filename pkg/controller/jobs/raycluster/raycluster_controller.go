@@ -51,12 +51,13 @@ func init() {
 		JobType:                &rayv1.RayCluster{},
 		AddToScheme:            rayv1.AddToScheme,
 		IsManagingObjectsOwner: isRayCluster,
+		MultiKueueAdapter:      &multikueueAdapter{},
 	}))
 }
 
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;watch;update
 // +kubebuilder:rbac:groups=ray.io,resources=rayclusters,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=ray.io,resources=rayclusters/status,verbs=get;update
+// +kubebuilder:rbac:groups=ray.io,resources=rayclusters/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=workloads,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=workloads/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=workloads/finalizers,verbs=update
@@ -98,7 +99,7 @@ func (j *RayCluster) PodLabelSelector() string {
 	return fmt.Sprintf("%s=%s", rayutils.RayClusterLabelKey, j.Name)
 }
 
-func (j *RayCluster) PodSets() []kueue.PodSet {
+func (j *RayCluster) PodSets() ([]kueue.PodSet, error) {
 	// len = workerGroups + head
 	podSets := make([]kueue.PodSet, len(j.Spec.WorkerGroupSpecs)+1)
 
@@ -127,7 +128,7 @@ func (j *RayCluster) PodSets() []kueue.PodSet {
 			TopologyRequest: jobframework.PodSetTopologyRequest(&wgs.Template.ObjectMeta, nil, nil, nil),
 		}
 	}
-	return podSets
+	return podSets, nil
 }
 
 func (j *RayCluster) RunWithPodSetsInfo(podSetsInfo []podset.PodSetInfo) error {

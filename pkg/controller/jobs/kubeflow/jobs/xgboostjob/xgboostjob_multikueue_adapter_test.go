@@ -42,7 +42,7 @@ const (
 	TestNamespace = "ns"
 )
 
-func TestMultikueueAdapter(t *testing.T) {
+func TestMultiKueueAdapter(t *testing.T) {
 	objCheckOpts := []cmp.Option{
 		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "ResourceVersion"),
 		cmpopts.EquateEmpty(),
@@ -131,7 +131,7 @@ func TestMultikueueAdapter(t *testing.T) {
 
 			ctx, _ := utiltesting.ContextWithLog(t)
 
-			adapter := kubeflowjob.NewMKAdapter(copyJobSpec, copyJobStatus, getEmptyList, gvk)
+			adapter := kubeflowjob.NewMKAdapter(copyJobSpec, copyJobStatus, getEmptyList, gvk, fromObject)
 
 			gotErr := tc.operation(ctx, adapter, managerClient, workerClient)
 

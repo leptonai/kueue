@@ -26,12 +26,15 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
-	"sigs.k8s.io/kueue/pkg/controller/jobs/pod"
+	podcontroller "sigs.k8s.io/kueue/pkg/controller/jobs/pod"
 	clientutil "sigs.k8s.io/kueue/pkg/util/client"
 	"sigs.k8s.io/kueue/pkg/util/parallelize"
+	utilpod "sigs.k8s.io/kueue/pkg/util/pod"
 )
 
 // +kubebuilder:rbac:groups="apps",resources=statefulsets,verbs=get;list;watch
@@ -56,7 +59,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	ctx = ctrl.LoggerInto(ctx, log)
 	log.V(2).Info("Reconciling StatefulSet")
 
-	err = r.fetchAndFinalizePods(ctx, req.Namespace, req.Name)
+	err = r.fetchAndFinalizePods(ctx, sts)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -64,39 +67,92 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return ctrl.Result{}, nil
 }
 
-func (r *Reconciler) fetchAndFinalizePods(ctx context.Context, namespace, statefulSetName string) error {
+func (r *Reconciler) fetchAndFinalizePods(ctx context.Context, sts *appsv1.StatefulSet) error {
 	podList := &corev1.PodList{}
-	if err := r.client.List(ctx, podList, client.InNamespace(namespace), client.MatchingLabels{
-		pod.GroupNameLabel: GetWorkloadName(statefulSetName),
+	if err := r.client.List(ctx, podList, client.InNamespace(sts.Namespace), client.MatchingLabels{
+		podcontroller.GroupNameLabel: GetWorkloadName(sts.Name),
 	}); err != nil {
 		return err
 	}
-	return r.finalizePods(ctx, podList.Items)
+	return r.finalizePods(ctx, sts, podList.Items)
 }
 
-func (r *Reconciler) finalizePods(ctx context.Context, pods []corev1.Pod) error {
+func (r *Reconciler) finalizePods(ctx context.Context, sts *appsv1.StatefulSet, pods []corev1.Pod) error {
 	log := ctrl.LoggerFrom(ctx)
 	return parallelize.Until(ctx, len(pods), func(i int) error {
-		p := &pods[i]
-		if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
-			return nil
-		}
-		err := clientutil.Patch(ctx, r.client, p, true, func() (bool, error) {
-			removed := controllerutil.RemoveFinalizer(p, pod.PodFinalizer)
-			if removed {
-				log.V(3).Info("Finalizing pod in group", "pod", klog.KObj(p), "group", p.Labels[pod.GroupNameLabel])
+		pod := &pods[i]
+		return client.IgnoreNotFound(clientutil.Patch(ctx, r.client, pod, true, func() (bool, error) {
+			if finalizePod(sts, pod) {
+				log.V(3).Info(
+					"Finalizing pod in group",
+					"pod", klog.KObj(pod),
+					"group", pod.Labels[podcontroller.GroupNameLabel],
+				)
+				return true, nil
 			}
-			return removed, nil
-		})
-		return client.IgnoreNotFound(err)
+			return false, nil
+		}))
 	})
+}
+
+func finalizePod(sts *appsv1.StatefulSet, pod *corev1.Pod) bool {
+	var updated bool
+
+	if shouldUngate(sts, pod) && utilpod.Ungate(pod, podcontroller.SchedulingGateName) {
+		updated = true
+	}
+
+	if shouldFinalize(sts, pod) && controllerutil.RemoveFinalizer(pod, podcontroller.PodFinalizer) {
+		updated = true
+	}
+
+	return updated
+}
+
+func shouldUngate(sts *appsv1.StatefulSet, pod *corev1.Pod) bool {
+	return sts.Status.CurrentRevision != sts.Status.UpdateRevision &&
+		sts.Status.CurrentRevision == pod.Labels[appsv1.ControllerRevisionHashLabelKey]
+}
+
+func shouldFinalize(sts *appsv1.StatefulSet, pod *corev1.Pod) bool {
+	return shouldUngate(sts, pod) || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ctrl.Log.V(3).Info("Setting up StatefulSet reconciler")
-	return ctrl.NewControllerManagedBy(mgr).For(&appsv1.StatefulSet{}).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&appsv1.StatefulSet{}).
+		WithEventFilter(r).
+		Complete(r)
 }
 
 func NewReconciler(client client.Client, _ record.EventRecorder, _ ...jobframework.Option) jobframework.JobReconcilerInterface {
 	return &Reconciler{client: client}
+}
+
+var _ predicate.Predicate = (*Reconciler)(nil)
+
+func (r *Reconciler) Generic(event.GenericEvent) bool {
+	return false
+}
+
+func (r *Reconciler) Create(e event.CreateEvent) bool {
+	return r.handle(e.Object)
+}
+
+func (r *Reconciler) Update(e event.UpdateEvent) bool {
+	return r.handle(e.ObjectNew)
+}
+
+func (r *Reconciler) Delete(event.DeleteEvent) bool {
+	return false
+}
+
+func (r *Reconciler) handle(obj client.Object) bool {
+	sts, isSts := obj.(*appsv1.StatefulSet)
+	if !isSts {
+		return false
+	}
+	// Handle only statefulset managed by kueue.
+	return jobframework.IsManagedByKueue(sts)
 }
