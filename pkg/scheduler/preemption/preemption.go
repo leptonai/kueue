@@ -130,7 +130,7 @@ func (p *Preemptor) getTargetsByLepton(log logr.Logger, wl workload.Info, reques
 	if len(candidates) == 0 {
 		return nil
 	}
-	sort.Slice(candidates, candidatesOrderingByLepton(candidates, cq.Name, p.clock.Now()))
+	sort.Slice(candidates, candidatesOrderingByLepton(candidates, wl.Obj, cq.Name, p.clock.Now()))
 	return minimalPreemptions(log, requests, cq, snapshot, frsNeedPreemption, candidates, true, nil)
 }
 
@@ -503,7 +503,7 @@ func (p *Preemptor) findCandidatesByLepton(wl *kueue.Workload, cq *cache.Cluster
 	preemptionStrategy := leptonapis.GetQueuePreemptionStrategy(cq.Annotations)
 
 	for _, candidateWl := range cq.Workloads {
-		if canBeCandidateByLepton(preemptionStrategy, wl, candidateWl, frsNeedPreemption) {
+		if leptonapis.CanBeCandidate(preemptionStrategy, wl, candidateWl, frsNeedPreemption) {
 			candidates = append(candidates, candidateWl)
 		}
 	}
@@ -514,34 +514,13 @@ func (p *Preemptor) findCandidatesByLepton(wl *kueue.Workload, cq *cache.Cluster
 				continue
 			}
 			for _, candidateWl := range cohortCQ.Workloads {
-				if canBeCandidateByLepton(preemptionStrategy, wl, candidateWl, frsNeedPreemption) {
+				if leptonapis.CanBeCandidate(preemptionStrategy, wl, candidateWl, frsNeedPreemption) {
 					candidates = append(candidates, candidateWl)
 				}
 			}
 		}
 	}
 	return candidates
-}
-
-func canBeCandidateByLepton(preemptionStrategy leptonapis.PreemptionStrategy, selfWl *kueue.Workload, candidateWl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
-	selfPriority := priority.Priority(selfWl)
-	candidatePriority := priority.Priority(candidateWl.Obj)
-	if !leptonapis.CanBePreempted(candidateWl.Obj) {
-		return false
-	}
-	if candidatePriority >= selfPriority {
-		return false
-	}
-	if !workloadUsesResources(candidateWl, frsNeedPreemption) {
-		return false
-	}
-	if !preemptionStrategy.CrossNamespaces && selfWl.Namespace != candidateWl.Obj.Namespace {
-		return false
-	}
-	if preemptionStrategy.MaxPriorityThreshold != nil && candidatePriority > *preemptionStrategy.MaxPriorityThreshold {
-		return false
-	}
-	return true
 }
 
 // findCandidates obtains candidates for preemption within the ClusterQueue and
@@ -645,7 +624,7 @@ func queueUnderNominalInResourcesNeedingPreemption(frsNeedPreemption sets.Set[re
 // 1. Workloads in the same ClusterQueue before the ones from other ClusterQueues in the cohort as the preemptor.
 // 2. Workloads with lower priority first.
 // 3. Workloads admitted more recently first.
-func candidatesOrderingByLepton(candidates []*workload.Info, cq string, now time.Time) func(int, int) bool {
+func candidatesOrderingByLepton(candidates []*workload.Info, by *kueue.Workload, cq string, now time.Time) func(int, int) bool {
 	return func(i, j int) bool {
 		a := candidates[i]
 		b := candidates[j]
@@ -653,6 +632,9 @@ func candidatesOrderingByLepton(candidates []*workload.Info, cq string, now time
 		bEvicted := meta.IsStatusConditionTrue(b.Obj.Status.Conditions, kueue.WorkloadEvicted)
 		if aEvicted != bEvicted {
 			return aEvicted
+		}
+		if order := leptonapis.ComparePreemptOrder(a.Obj, b.Obj, by); order != 0 {
+			return order < 0
 		}
 		aInCQ := a.ClusterQueue == cq
 		bInCQ := b.ClusterQueue == cq
