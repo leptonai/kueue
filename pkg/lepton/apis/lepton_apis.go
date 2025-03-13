@@ -2,8 +2,15 @@ package apis
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
+	"sigs.k8s.io/kueue/pkg/resources"
+	"sigs.k8s.io/kueue/pkg/util/priority"
+	"sigs.k8s.io/kueue/pkg/workload"
 )
 
 const (
@@ -11,15 +18,10 @@ const (
 	labelCanBePreempted = "kueue.lepton.ai/can-be-preempted"
 
 	annotationPreemptionStrategy = "kueue.lepton.ai/preemption-strategy"
+
+	labelNodeReservationRequestBinding                = "node-reservation.lepton.ai/request-binding"
+	annotationCanBePreemptedByNodeReservationRequests = "node-reservation.lepton.ai/can-be-preempted-by"
 )
-
-func CanPreempt(wl *kueue.Workload) bool {
-	return wl.Labels[labelCanPreempt] == "true"
-}
-
-func CanBePreempted(wl *kueue.Workload) bool {
-	return wl.Labels[labelCanBePreempted] == "true"
-}
 
 type PreemptionStrategy struct {
 	CrossNamespaces      bool   `json:"crossNamespaces,omitempty"`
@@ -37,4 +39,65 @@ func GetQueuePreemptionStrategy(annotations map[string]string) PreemptionStrateg
 		return PreemptionStrategy{}
 	}
 	return p
+}
+
+func ComparePreemptOrder(i, j, by *kueue.Workload) int32 {
+	if nrrName := by.Labels[labelNodeReservationRequestBinding]; nrrName != "" {
+		if canBePreemptedByNRRs(i, nrrName) {
+			return -1
+		}
+		if canBePreemptedByNRRs(j, nrrName) {
+			return 1
+		}
+	}
+	return 0
+}
+
+func canBePreemptedByNRRs(wl *kueue.Workload, nrrName string) bool {
+	if val := wl.Annotations[annotationCanBePreemptedByNodeReservationRequests]; val != "" {
+		return slices.Contains(strings.Split(val, ","), nrrName)
+	}
+	return false
+}
+
+func CanPreempt(wl *kueue.Workload) bool {
+	return wl.Labels[labelCanPreempt] == "true" || wl.Labels[labelNodeReservationRequestBinding] != ""
+}
+
+func CanBeCandidate(preemptionStrategy PreemptionStrategy, selfWl *kueue.Workload, candidateWl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
+	if !workloadUsesResources(candidateWl, frsNeedPreemption) {
+		return false
+	}
+
+	// if the reservation request matches, can always be candidate
+	if nrrName := selfWl.Labels[labelNodeReservationRequestBinding]; nrrName != "" && canBePreemptedByNRRs(candidateWl.Obj, nrrName) {
+		return true
+	}
+
+	selfPriority := priority.Priority(selfWl)
+	candidatePriority := priority.Priority(candidateWl.Obj)
+	if candidateWl.Obj.Labels[labelCanBePreempted] != "true" {
+		return false
+	}
+	if candidatePriority >= selfPriority {
+		return false
+	}
+	if !preemptionStrategy.CrossNamespaces && selfWl.Namespace != candidateWl.Obj.Namespace {
+		return false
+	}
+	if preemptionStrategy.MaxPriorityThreshold != nil && candidatePriority > *preemptionStrategy.MaxPriorityThreshold {
+		return false
+	}
+	return true
+}
+
+func workloadUsesResources(wl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
+	for _, ps := range wl.TotalRequests {
+		for res, flv := range ps.Flavors {
+			if frsNeedPreemption.Has(resources.FlavorResource{Flavor: flv, Resource: res}) {
+				return true
+			}
+		}
+	}
+	return false
 }
