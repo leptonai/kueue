@@ -60,6 +60,14 @@ func canBePreemptedByNRRs(wl *kueue.Workload, nrrName string) bool {
 	return false
 }
 
+func CanPreemptByNRRs(wl, target *kueue.Workload) bool {
+	nrrName := wl.Labels[labelNodeReservationRequestBinding]
+	if nrrName == "" {
+		return false
+	}
+	return canBePreemptedByNRRs(target, nrrName)
+}
+
 func CanPreempt(wl *kueue.Workload) bool {
 	return wl.Labels[labelCanPreempt] == "true" || wl.Labels[labelNodeReservationRequestBinding] != ""
 }
