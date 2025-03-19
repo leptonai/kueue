@@ -41,6 +41,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/pkg/cache"
 	"sigs.k8s.io/kueue/pkg/features"
+	leptonapis "sigs.k8s.io/kueue/pkg/lepton/apis"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/queue"
 	"sigs.k8s.io/kueue/pkg/resources"
@@ -607,6 +608,19 @@ func (e entryOrdering) Swap(i, j int) {
 func (e entryOrdering) Less(i, j int) bool {
 	a := e.entries[i]
 	b := e.entries[j]
+
+	c1 := leptonapis.CanPreempt(a.Obj)
+	c2 := leptonapis.CanPreempt(b.Obj)
+	if c1 != c2 {
+		return c1
+	}
+
+	if leptonapis.CanPreemptByNRRs(a.Obj, b.Obj) {
+		return true
+	}
+	if leptonapis.CanPreemptByNRRs(b.Obj, a.Obj) {
+		return false
+	}
 
 	// 1. Request under nominal quota.
 	aBorrows := a.assignment.Borrows()
