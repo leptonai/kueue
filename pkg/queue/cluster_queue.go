@@ -32,6 +32,7 @@ import (
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/pkg/hierarchy"
+	leptonapis "sigs.k8s.io/kueue/pkg/lepton/apis"
 	"sigs.k8s.io/kueue/pkg/util/heap"
 	utilpriority "sigs.k8s.io/kueue/pkg/util/priority"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -412,6 +413,12 @@ func (c *ClusterQueue) RequeueIfNotPresent(wInfo *workload.Info, reason RequeueR
 // time.
 func queueOrderingFunc(wo workload.Ordering) func(a, b *workload.Info) bool {
 	return func(a, b *workload.Info) bool {
+		c1 := leptonapis.CanPreempt(a.Obj)
+		c2 := leptonapis.CanPreempt(b.Obj)
+		if c1 != c2 {
+			return c1
+		}
+
 		p1 := utilpriority.Priority(a.Obj)
 		p2 := utilpriority.Priority(b.Obj)
 
