@@ -56,7 +56,7 @@ require (
 	github.com/goccy/go-yaml v1.13.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/gomarkdown/markdown v0.0.0-20240328165702-4d01890c35c0 // indirect
+	github.com/gomarkdown/markdown v0.0.0-20240729212818-a2a9c4f76ef5 // indirect
 	github.com/google/btree v1.0.1 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
