@@ -21,6 +21,9 @@ const (
 
 	labelNodeReservationRequestBinding                = "node-reservation.lepton.ai/request-binding"
 	annotationCanBePreemptedByNodeReservationRequests = "node-reservation.lepton.ai/can-be-preempted-by"
+
+	labelPreAllocationID  = "kueue.lepton.ai/pre-allocation-id"
+	labelPreAllocationFor = "kueue.lepton.ai/pre-allocation-for"
 )
 
 type PreemptionStrategy struct {
@@ -42,6 +45,14 @@ func GetQueuePreemptionStrategy(annotations map[string]string) PreemptionStrateg
 }
 
 func ComparePreemptOrder(i, j, by *kueue.Workload) int32 {
+	if preAllocationID := by.Labels[labelPreAllocationID]; preAllocationID != "" {
+		if i.Labels[labelPreAllocationFor] == preAllocationID {
+			return -1
+		}
+		if j.Labels[labelPreAllocationFor] == preAllocationID {
+			return -1
+		}
+	}
 	if nrrName := by.Labels[labelNodeReservationRequestBinding]; nrrName != "" {
 		if canBePreemptedByNRRs(i, nrrName) {
 			return -1
@@ -69,7 +80,9 @@ func CanPreemptByNRRs(wl, target *kueue.Workload) bool {
 }
 
 func CanPreempt(wl *kueue.Workload) bool {
-	return wl.Labels[labelCanPreempt] == "true" || wl.Labels[labelNodeReservationRequestBinding] != ""
+	return wl.Labels[labelCanPreempt] == "true" ||
+		wl.Labels[labelNodeReservationRequestBinding] != "" ||
+		wl.Labels[labelPreAllocationID] != ""
 }
 
 func CanBeCandidate(preemptionStrategy PreemptionStrategy, selfWl *kueue.Workload, candidateWl *workload.Info, frsNeedPreemption sets.Set[resources.FlavorResource]) bool {
@@ -77,10 +90,16 @@ func CanBeCandidate(preemptionStrategy PreemptionStrategy, selfWl *kueue.Workloa
 		return false
 	}
 
+	// if the workload matches pre-allocation for self workload
+	if preAllocationID := selfWl.Labels[labelPreAllocationID]; preAllocationID != "" && preAllocationID == candidateWl.Obj.Labels[labelPreAllocationFor] {
+		return true
+	}
+
 	// if the reservation request matches, can always be candidate
 	if nrrName := selfWl.Labels[labelNodeReservationRequestBinding]; nrrName != "" && canBePreemptedByNRRs(candidateWl.Obj, nrrName) {
 		return true
 	}
+
 	if selfWl.Labels[labelCanPreempt] != "true" {
 		return false
 	}
