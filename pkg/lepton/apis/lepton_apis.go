@@ -54,6 +54,9 @@ func ComparePreemptOrder(i, j, by *kueue.Workload) int32 {
 }
 
 func canBePreemptedByNRRs(wl *kueue.Workload, nrrName string) bool {
+	if wl.Labels[labelCanBePreempted] != "true" {
+		return false
+	}
 	if val := wl.Annotations[annotationCanBePreemptedByNodeReservationRequests]; val != "" {
 		return slices.Contains(strings.Split(val, ","), nrrName)
 	}
@@ -81,15 +84,12 @@ func CanBeCandidate(preemptionStrategy PreemptionStrategy, selfWl *kueue.Workloa
 	if nrrName := selfWl.Labels[labelNodeReservationRequestBinding]; nrrName != "" && canBePreemptedByNRRs(candidateWl.Obj, nrrName) {
 		return true
 	}
-	if selfWl.Labels[labelCanPreempt] != "true" {
+	if selfWl.Labels[labelCanPreempt] != "true" || candidateWl.Obj.Labels[labelCanBePreempted] != "true" {
 		return false
 	}
 
 	selfPriority := priority.Priority(selfWl)
 	candidatePriority := priority.Priority(candidateWl.Obj)
-	if candidateWl.Obj.Labels[labelCanBePreempted] != "true" {
-		return false
-	}
 	if candidatePriority >= selfPriority {
 		return false
 	}
