@@ -120,7 +120,8 @@ func (p *Preemptor) GetTargets(log logr.Logger, wl workload.Info, assignment fla
 	if leptonapis.CanPreempt(wl.Obj) {
 		return p.getTargetsByLepton(log, wl, requests, frsNeedPreemption, snapshot)
 	}
-	return p.getTargets(log, wl, requests, frsNeedPreemption, snapshot)
+	return nil
+	// return p.getTargets(log, wl, requests, frsNeedPreemption, snapshot)
 }
 
 func (p *Preemptor) getTargetsByLepton(log logr.Logger, wl workload.Info, requests resources.FlavorResourceQuantities,
