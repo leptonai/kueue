@@ -621,6 +621,12 @@ func (e entryOrdering) Less(i, j int) bool {
 	if leptonapis.CanPreemptByNRRs(b.Obj, a.Obj) {
 		return false
 	}
+	if leptonapis.CanPreemptByScheduleFailed(a.Obj, b.Obj) {
+		return true
+	}
+	if leptonapis.CanPreemptByScheduleFailed(b.Obj, a.Obj) {
+		return false
+	}
 
 	// 1. Request under nominal quota.
 	aBorrows := a.assignment.Borrows()

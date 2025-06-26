@@ -21,6 +21,8 @@ const (
 
 	labelNodeReservationRequestBinding                = "node-reservation.lepton.ai/request-binding"
 	annotationCanBePreemptedByNodeReservationRequests = "node-reservation.lepton.ai/can-be-preempted-by"
+
+	labelScheduleFailed = "kueue.lepton.ai/schedule-failed"
 )
 
 type PreemptionStrategy struct {
@@ -41,26 +43,18 @@ func GetQueuePreemptionStrategy(annotations map[string]string) PreemptionStrateg
 	return p
 }
 
-func ComparePreemptOrder(i, j, by *kueue.Workload) int32 {
-	if nrrName := by.Labels[labelNodeReservationRequestBinding]; nrrName != "" {
-		if canBePreemptedByNRRs(i, nrrName) {
-			return -1
-		}
-		if canBePreemptedByNRRs(j, nrrName) {
-			return 1
-		}
+func ComparePreemptOrder(i, j, wl *kueue.Workload) int32 {
+	if CanPreemptByNRRs(wl, i) {
+		return -1
+	} else if CanPreemptByNRRs(wl, j) {
+		return 1
+	}
+	if CanPreemptByScheduleFailed(wl, i) {
+		return -1
+	} else if CanPreemptByScheduleFailed(wl, j) {
+		return 1
 	}
 	return 0
-}
-
-func canBePreemptedByNRRs(wl *kueue.Workload, nrrName string) bool {
-	if wl.Labels[labelCanBePreempted] != "true" {
-		return false
-	}
-	if val := wl.Annotations[annotationCanBePreemptedByNodeReservationRequests]; val != "" {
-		return slices.Contains(strings.Split(val, ","), nrrName)
-	}
-	return false
 }
 
 func CanPreemptByNRRs(wl, target *kueue.Workload) bool {
@@ -68,7 +62,19 @@ func CanPreemptByNRRs(wl, target *kueue.Workload) bool {
 	if nrrName == "" {
 		return false
 	}
-	return canBePreemptedByNRRs(target, nrrName)
+	if target.Labels[labelCanBePreempted] != "true" {
+		return false
+	}
+	if val := target.Annotations[annotationCanBePreemptedByNodeReservationRequests]; val != "" {
+		return slices.Contains(strings.Split(val, ","), nrrName)
+	}
+	return false
+}
+
+func CanPreemptByScheduleFailed(wl, target *kueue.Workload) bool {
+	return wl.Labels[labelCanPreempt] == "true" &&
+		priority.Priority(wl) > priority.Priority(target) &&
+		target.Labels[labelScheduleFailed] == "true"
 }
 
 func CanPreempt(wl *kueue.Workload) bool {
@@ -81,9 +87,13 @@ func CanBeCandidate(preemptionStrategy PreemptionStrategy, selfWl *kueue.Workloa
 	}
 
 	// if the reservation request matches, can always be candidate
-	if nrrName := selfWl.Labels[labelNodeReservationRequestBinding]; nrrName != "" && canBePreemptedByNRRs(candidateWl.Obj, nrrName) {
+	if CanPreemptByNRRs(selfWl, candidateWl.Obj) {
 		return true
 	}
+	if CanPreemptByScheduleFailed(selfWl, candidateWl.Obj) {
+		return true
+	}
+
 	if selfWl.Labels[labelCanPreempt] != "true" || candidateWl.Obj.Labels[labelCanBePreempted] != "true" {
 		return false
 	}
@@ -92,6 +102,13 @@ func CanBeCandidate(preemptionStrategy PreemptionStrategy, selfWl *kueue.Workloa
 	candidatePriority := priority.Priority(candidateWl.Obj)
 	if candidatePriority >= selfPriority {
 		return false
+	}
+	// if the candidate is bound to a reservation, currently we only allow it to be preempted by workload with the same reservation
+	// TODO: maybe if the candidate deploys on nodes that are all not reserved, it can be preempted by others
+	if nrrName := candidateWl.Obj.Labels[labelNodeReservationRequestBinding]; nrrName != "" {
+		if nrrName != selfWl.Labels[labelNodeReservationRequestBinding] {
+			return false
+		}
 	}
 	if !preemptionStrategy.CrossNamespaces && selfWl.Namespace != candidateWl.Obj.Namespace {
 		return false
