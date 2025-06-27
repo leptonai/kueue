@@ -72,9 +72,13 @@ func CanPreemptByNRRs(wl, target *kueue.Workload) bool {
 }
 
 func CanPreemptByScheduleFailed(wl, target *kueue.Workload) bool {
-	return wl.Labels[labelCanPreempt] == "true" &&
-		priority.Priority(wl) > priority.Priority(target) &&
-		target.Labels[labelScheduleFailed] == "true"
+	if target.Labels[labelScheduleFailed] != "true" {
+		return false
+	}
+	if wl.Labels[labelNodeReservationRequestBinding] != "" {
+		return true
+	}
+	return wl.Labels[labelCanPreempt] == "true" && priority.Priority(wl) > priority.Priority(target)
 }
 
 func CanPreempt(wl *kueue.Workload) bool {
