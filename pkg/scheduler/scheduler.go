@@ -627,6 +627,9 @@ func (e entryOrdering) Less(i, j int) bool {
 	if leptonapis.CanPreemptByScheduleFailed(b.Obj, a.Obj) {
 		return false
 	}
+	if n := leptonapis.CompareByLastPreempted(a.Obj, b.Obj); n != 0 {
+		return n > 0
+	}
 
 	// 1. Request under nominal quota.
 	aBorrows := a.assignment.Borrows()
