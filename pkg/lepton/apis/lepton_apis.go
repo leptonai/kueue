@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -43,6 +46,33 @@ func GetQueuePreemptionStrategy(annotations map[string]string) PreemptionStrateg
 	return p
 }
 
+func getCondition(obj *kueue.Workload) *metav1.Condition {
+	for i := range obj.Status.Conditions {
+		c := &obj.Status.Conditions[i]
+		if c.Type == kueue.WorkloadPreempted && c.Status == metav1.ConditionTrue {
+			return c
+		}
+	}
+	return nil
+}
+
+func CompareByLastPreempted(a, b *kueue.Workload) int32 {
+	ac := getCondition(a)
+	bc := getCondition(b)
+	if ac != nil && bc != nil {
+		if ac.LastTransitionTime.Before(&bc.LastTransitionTime) {
+			return 1
+		}
+		return -1
+	}
+	if ac != nil && time.Since(ac.LastTransitionTime.Time) < time.Second*5 {
+		return -1
+	} else if bc != nil && time.Since(bc.LastTransitionTime.Time) < time.Second*5 {
+		return 1
+	}
+	return 0
+}
+
 func ComparePreemptOrder(i, j, wl *kueue.Workload) int32 {
 	if CanPreemptByNRRs(wl, i) {
 		return -1
@@ -60,9 +90,6 @@ func ComparePreemptOrder(i, j, wl *kueue.Workload) int32 {
 func CanPreemptByNRRs(wl, target *kueue.Workload) bool {
 	nrrName := wl.Labels[labelNodeReservationRequestBinding]
 	if nrrName == "" {
-		return false
-	}
-	if target.Labels[labelCanBePreempted] != "true" {
 		return false
 	}
 	if val := target.Annotations[annotationCanBePreemptedByNodeReservationRequests]; val != "" {
