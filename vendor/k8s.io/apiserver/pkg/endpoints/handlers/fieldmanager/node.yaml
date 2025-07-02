@@ -129,17 +129,9 @@ status:
       Port: 10250
   images:
   - names:
-    - grafana/grafana@sha256:80e5e113a984d74836aa16f5b4524012099436b1a50df293f00ac6377fb512c8
-    - grafana/grafana:4.4.2
-    sizeBytes: 287008013
-  - names:
     - registry.k8s.io/node-problem-detector@sha256:f95cab985c26b2f46e9bd43283e0bfa88860c14e0fb0649266babe8b65e9eb2b
     - registry.k8s.io/node-problem-detector:v0.4.1
     sizeBytes: 286572743
-  - names:
-    - grafana/grafana@sha256:7ff7f9b2501a5d55b55ce3f58d21771b1c5af1f2a4ab7dbf11bef7142aae7033
-    - grafana/grafana:4.2.0
-    sizeBytes: 277940263
   - names:
     - influxdb@sha256:7dddf03376348876ed4bdf33d6dfa3326f45a2bae0930dbd80781a374eb519bc
     - influxdb:1.2.2
