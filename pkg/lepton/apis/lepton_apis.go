@@ -23,6 +23,8 @@ const (
 	annotationCanBePreemptedByNodeReservationRequests = "node-reservation.lepton.ai/can-be-preempted-by"
 
 	labelScheduleFailed = "kueue.lepton.ai/schedule-failed"
+
+	labelTriggerRequeue = "kueue.lepton.ai/trigger-requeue"
 )
 
 type PreemptionStrategy struct {
@@ -43,6 +45,16 @@ func GetQueuePreemptionStrategy(annotations map[string]string) PreemptionStrateg
 	return p
 }
 
+func WorkloadChangesWithPreemptionEffect(wlOld, wlNew *kueue.Workload) bool {
+	return wlOld.Labels[labelTriggerRequeue] != wlNew.Labels[labelTriggerRequeue] ||
+		wlOld.Labels[labelScheduleFailed] != wlNew.Labels[labelScheduleFailed] ||
+		wlOld.Annotations[annotationCanBePreemptedByNodeReservationRequests] != wlNew.Annotations[annotationCanBePreemptedByNodeReservationRequests] ||
+		wlOld.Labels[labelNodeReservationRequestBinding] != wlNew.Labels[labelNodeReservationRequestBinding] ||
+		wlOld.Labels[labelCanPreempt] != wlNew.Labels[labelCanPreempt] ||
+		wlOld.Labels[labelCanBePreempted] != wlNew.Labels[labelCanBePreempted]
+
+}
+
 func ComparePreemptOrder(i, j, wl *kueue.Workload) int32 {
 	if CanPreemptByNRRs(wl, i) {
 		return -1
@@ -60,9 +72,6 @@ func ComparePreemptOrder(i, j, wl *kueue.Workload) int32 {
 func CanPreemptByNRRs(wl, target *kueue.Workload) bool {
 	nrrName := wl.Labels[labelNodeReservationRequestBinding]
 	if nrrName == "" {
-		return false
-	}
-	if target.Labels[labelCanBePreempted] != "true" {
 		return false
 	}
 	if val := target.Annotations[annotationCanBePreemptedByNodeReservationRequests]; val != "" {

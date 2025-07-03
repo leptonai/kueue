@@ -49,6 +49,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/cache"
 	"sigs.k8s.io/kueue/pkg/controller/core/indexer"
 	"sigs.k8s.io/kueue/pkg/features"
+	leptonapis "sigs.k8s.io/kueue/pkg/lepton/apis"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/queue"
 	utilac "sigs.k8s.io/kueue/pkg/util/admissioncheck"
@@ -773,6 +774,9 @@ func (r *WorkloadReconciler) Update(e event.UpdateEvent) bool {
 		// and are not supposed to actually change anything.
 		if err := r.cache.UpdateWorkload(oldWl, wlCopy); err != nil {
 			log.Error(err, "Updating workload in cache")
+		}
+		if leptonapis.WorkloadChangesWithPreemptionEffect(oldWl, wl) {
+			r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wl, nil)
 		}
 	}
 
