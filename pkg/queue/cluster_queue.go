@@ -158,7 +158,8 @@ func (c *ClusterQueue) PushOrUpdate(wInfo *workload.Info) {
 			equality.Semantic.DeepEqual(apimeta.FindStatusCondition(oldInfo.Obj.Status.Conditions, kueue.WorkloadEvicted),
 				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadEvicted)) &&
 			equality.Semantic.DeepEqual(apimeta.FindStatusCondition(oldInfo.Obj.Status.Conditions, kueue.WorkloadRequeued),
-				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadRequeued)) {
+				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadRequeued)) &&
+			!leptonapis.WorkloadChangesWithPreemptionEffect(oldInfo.Obj, wInfo.Obj) {
 			c.inadmissibleWorkloads[key] = wInfo
 			return
 		}
@@ -417,6 +418,19 @@ func queueOrderingFunc(wo workload.Ordering) func(a, b *workload.Info) bool {
 		c2 := leptonapis.CanPreempt(b.Obj)
 		if c1 != c2 {
 			return c1
+		}
+
+		if leptonapis.CanPreemptByNRRs(a.Obj, b.Obj) {
+			return true
+		}
+		if leptonapis.CanPreemptByNRRs(b.Obj, a.Obj) {
+			return false
+		}
+		if leptonapis.CanPreemptByScheduleFailed(a.Obj, b.Obj) {
+			return true
+		}
+		if leptonapis.CanPreemptByScheduleFailed(b.Obj, a.Obj) {
+			return false
 		}
 
 		p1 := utilpriority.Priority(a.Obj)
